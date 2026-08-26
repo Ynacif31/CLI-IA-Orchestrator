@@ -1,31 +1,19 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { Command } from 'commander';
-import { TaskRouter } from './router';
-import { OmniRouteClassifier } from './classifiers/omniRouteClassifier';
-import { AgentRunner, RunResult } from './adapters/agentRunner';
-import { ObsidianMcpBridge } from './mcp/obsidianClient';
-import {
-  resolveObsidianConfig,
-  loadConfig,
-  saveConfig,
-  dumpConfig,
-  getConfigValue,
-  setConfigValue,
-  coerceValue,
-  CONFIG_FILE
-} from './config';
-import { recordUsage, printUsageReport } from './usage';
-import { TaskEvaluation } from './types';
+import { TaskRouter } from './router.js';
+import { OmniRouteClassifier } from './classifiers/omniRouteClassifier.js';
+import { AgentRunner } from './adapters/agentRunner.js';
+import { ObsidianMcpBridge } from './mcp/obsidianClient.js';
+import { resolveObsidianConfig } from './config.js';
+import { recordUsage } from './usage.js';
+import type { TaskEvaluation } from './types.js';
+import { startInteractiveUI } from './ui/index.js';
 
 const AGENT_NAMES = Object.keys(AgentRunner.commands);
 
 function getVersion(): string {
-  try {
-    return require('../package.json').version;
-  } catch {
-    return '0.1.0';
-  }
+  return '0.1.0';
 }
 
 function hasBinary(name: string): boolean {
@@ -37,7 +25,23 @@ const program = new Command();
 program
   .name('orchestrator')
   .description('Multi-agent CLI orchestrator (RFC 0001)')
-  .version(getVersion(), '-v, --version');
+  .version(getVersion(), '-v, --version')
+  .option('-i, --interactive', 'abre a interface interativa de terminal (Ink)')
+  .action(async (opts) => {
+    // If orchestrator is called with no subcommand, open interactive UI in TTY or if requested
+    if (process.stdout.isTTY || opts.interactive) {
+      await startInteractiveUI();
+    } else {
+      program.help();
+    }
+  });
+
+program
+  .command('ui')
+  .description('Abre a interface gráfica de terminal interativa (Ink)')
+  .action(async () => {
+    await startInteractiveUI();
+  });
 
 program
   .command('run <task>')
@@ -60,8 +64,6 @@ program
     obsidianArgs?: string[];
     obsidian?: boolean;
   }) => {
-    const cfg = loadConfig();
-
     let agent: string;
     let evaluation: TaskEvaluation;
 
@@ -72,20 +74,13 @@ program
       }
       agent = opts.agent;
       evaluation = {
-        agent: agent as TaskEvaluation['agent'],
+        agent: agent as any,
         reason: 'Seleção manual de agente via flag --agent',
         estimatedComplexity: 'medium',
         source: 'manual'
       };
     } else {
-      const custom = TaskRouter.routeCustom(task, cfg.routing);
-      if (custom) {
-        if (!AgentRunner.commands[custom.agent]) {
-          console.error(`agente inválido na regra customizada: ${custom.agent}`);
-          process.exit(1);
-        }
-        evaluation = custom;
-      } else if (opts.classifier === false) {
+      if (opts.classifier === false) {
         evaluation = TaskRouter.routeDeterministic(task);
         console.error(`[router] Classificador desativado manualmente. Usando fallback determinístico.`);
       } else {
@@ -100,7 +95,7 @@ program
       console.error(`→ ${agent} (${evaluation.estimatedComplexity}): ${evaluation.reason}`);
     }
 
-    const cmd = cfg.agents[agent]?.cmd ?? AgentRunner.commands[agent].cmd;
+    const { cmd } = AgentRunner.commands[agent];
     if (!hasBinary(cmd)) {
       console.error(`erro: binário '${cmd}' não encontrado no PATH`);
       process.exit(1);
@@ -130,91 +125,48 @@ program
       }
     }
 
-    let result: RunResult;
+    const startTime = Date.now();
+    let exitCode = 0;
+    let durationMs = 0;
+    let totalTokens = 0;
+
     try {
-      result = await AgentRunner.execute(agent, task, { cmd, context: obsidianContext });
-    } catch (err) {
-      console.error(`erro ao executar ${agent}: ${(err as Error).message}`);
-      result = { exitCode: 1, inputTokens: null, outputTokens: null, durationMs: 0 };
-    }
+      const runResult = await AgentRunner.execute(agent, task, { context: obsidianContext });
+      exitCode = runResult.exitCode ?? 0;
+      durationMs = runResult.durationMs;
+      totalTokens = (runResult.inputTokens ?? 0) + (runResult.outputTokens ?? 0);
+      if (exitCode !== 0) {
+        process.exitCode = exitCode;
+      }
+    } catch (err: any) {
+      console.error(`erro ao executar ${agent}: ${err.message}`);
+      exitCode = 1;
+      process.exitCode = 1;
+      durationMs = Date.now() - startTime;
+    } finally {
+      recordUsage(agent, durationMs, totalTokens);
 
-    const exitCode = result.exitCode ?? 1;
-    if (exitCode !== 0) {
-      console.error(`Agente ${agent} finalizou com código de saída ${exitCode}`);
-    }
-    process.exitCode = exitCode;
+      if (obsidianBridge.isConnected()) {
+        try {
+          const logPath = await obsidianBridge.createTaskLog({
+            agent,
+            task,
+            reason: evaluation.reason,
+            estimatedComplexity: evaluation.estimatedComplexity,
+            exitCode,
+            durationMs
+          });
 
-    recordUsage({
-      timestamp: new Date().toISOString(),
-      agent,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      durationMs: result.durationMs
-    });
-
-    if (obsidianBridge.isConnected()) {
-      try {
-        const logPath = await obsidianBridge.createTaskLog({
-          agent,
-          task,
-          reason: evaluation.reason,
-          estimatedComplexity: evaluation.estimatedComplexity,
-          exitCode,
-          durationMs: result.durationMs
-        });
-
-        if (logPath) {
-          console.error(`[obsidian] Log registrado em ${logPath}`);
+          if (logPath) {
+            console.error(`[obsidian] Log registrado em ${logPath}`);
+          }
+        } catch (err: any) {
+          console.error(`[obsidian] Aviso: Falha ao registrar log no vault: ${err.message}`);
+        } finally {
+          await obsidianBridge.disconnect().catch(() => {});
         }
-      } catch (err: any) {
-        console.error(`[obsidian] Aviso: Falha ao registrar log no vault: ${err.message}`);
-      } finally {
-        await obsidianBridge.disconnect().catch(() => {});
       }
     }
-  });
-
-program
-  .command('usage')
-  .description('Mostra consumo do dia/mês e alerta se passar do limite configurado')
-  .action(() => {
-    printUsageReport(loadConfig().threshold);
-  });
-
-program
-  .command('config')
-  .description('Mostra a configuração (cria ~/.orchestrator/config.yaml se ausente); use "config get <chave>" ou "config set <chave> <valor>"')
-  .argument('[op]', 'get | set')
-  .argument('[key]', 'chave em dot-path, ex: agents.agy.cmd, routing.deploy, threshold')
-  .argument('[value]', 'valor (apenas no set)')
-  .action((op: string | undefined, key: string | undefined, value: string | undefined) => {
-    const cfg = loadConfig();
-    if (op === 'get') {
-      if (!key) {
-        console.error('uso: orchestrator config get <chave>');
-        process.exit(1);
-      }
-      const found = getConfigValue(cfg, key);
-      console.log(found === undefined ? '' : typeof found === 'object' ? JSON.stringify(found) : String(found));
-      return;
-    }
-    if (op === 'set') {
-      if (!key || value === undefined) {
-        console.error('uso: orchestrator config set <chave> <valor>');
-        process.exit(1);
-      }
-      setConfigValue(cfg, key, coerceValue(value));
-      saveConfig(cfg);
-      console.log('ok');
-      return;
-    }
-    if (op !== undefined) {
-      console.error(`operação desconhecida: ${op} (use get | set)`);
-      process.exit(1);
-    }
-    saveConfig(cfg);
-    console.log(`config: ${CONFIG_FILE}`);
-    console.log(dumpConfig(cfg));
   });
 
 program.parse(process.argv);

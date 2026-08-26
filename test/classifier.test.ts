@@ -4,7 +4,7 @@ import {
   OmniRouteClassifier,
   buildOmniRouteEndpoint,
   parseClassifierResponse
-} from '../src/classifiers/omniRouteClassifier';
+} from '../src/classifiers/omniRouteClassifier.js';
 
 test('buildOmniRouteEndpoint constructs valid messages endpoints', () => {
   assert.equal(buildOmniRouteEndpoint('http://localhost:20128'), 'http://localhost:20128/v1/messages');

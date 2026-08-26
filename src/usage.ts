@@ -1,63 +1,68 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-export interface UsageEntry {
-  timestamp: string;
-  agent: string;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  durationMs: number;
+export interface UsageStats {
+  totalTasks: number;
+  totalTokens: number;
+  totalDurationMs: number;
+  agentBreakdown: Record<string, number>;
 }
 
-const DIR = path.join(homedir(), '.orchestrator');
-const FILE = path.join(DIR, 'usage.json');
+export function loadUsageStats(searchDir: string = process.cwd()): UsageStats {
+  const candidateFiles = [
+    path.join(searchDir, 'usage.json'),
+    path.join(searchDir, '.orchestrator', 'usage.json'),
+    path.join(searchDir, 'graphify-out', 'cost.json')
+  ];
 
-export function recordUsage(entry: UsageEntry): void {
-  const entries = loadEntries();
-  entries.push(entry);
-  mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, JSON.stringify(entries, null, 2));
-}
-
-export function loadEntries(): UsageEntry[] {
-  if (!existsSync(FILE)) return [];
-  try {
-    return JSON.parse(readFileSync(FILE, 'utf8')) as UsageEntry[];
-  } catch {
-    return [];
+  for (const file of candidateFiles) {
+    if (fs.existsSync(file)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.total_input_tokens !== undefined) {
+          return {
+            totalTasks: data.runs?.length || 0,
+            totalTokens: (data.total_input_tokens || 0) + (data.total_output_tokens || 0),
+            totalDurationMs: 0,
+            agentBreakdown: {}
+          };
+        }
+        if (data.totalTasks !== undefined || data.totalTokens !== undefined) {
+          return {
+            totalTasks: data.totalTasks || 0,
+            totalTokens: data.totalTokens || 0,
+            totalDurationMs: data.totalDurationMs || 0,
+            agentBreakdown: data.agentBreakdown || {}
+          };
+        }
+      } catch {}
+    }
   }
-}
 
-function formatTokens(n: number): string {
-  return n.toLocaleString('pt-BR');
-}
-
-function formatMs(ms: number): string {
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-export function printUsageReport(threshold: number): void {
-  const entries = loadEntries();
-  const now = new Date().toISOString();
-  const day = now.slice(0, 10);
-  const month = now.slice(0, 7);
-
-  const summarize = (window: string) => {
-    const list = entries.filter((e) => e.timestamp.startsWith(window));
-    return {
-      runs: list.length,
-      tokens: list.reduce((acc, e) => acc + (e.inputTokens ?? 0) + (e.outputTokens ?? 0), 0),
-      durationMs: list.reduce((acc, e) => acc + e.durationMs, 0)
-    };
+  return {
+    totalTasks: 0,
+    totalTokens: 0,
+    totalDurationMs: 0,
+    agentBreakdown: {}
   };
+}
 
-  const today = summarize(day);
-  const monthly = summarize(month);
+export function recordUsage(
+  agent: string,
+  durationMs: number,
+  tokens: number = 0,
+  searchDir: string = process.cwd()
+): void {
+  const usageFile = path.join(searchDir, 'usage.json');
+  const current = loadUsageStats(searchDir);
 
-  console.log(`Hoje: ${today.runs} execução(ões) · ${formatTokens(today.tokens)} tokens · ${formatMs(today.durationMs)}`);
-  console.log(`Mês:  ${monthly.runs} execução(ões) · ${formatTokens(monthly.tokens)} tokens · ${formatMs(monthly.durationMs)}`);
-  if (today.tokens > threshold) {
-    console.log(`ALERTA: uso de hoje (${formatTokens(today.tokens)} tokens) passou do limite de ${formatTokens(threshold)}`);
-  }
+  current.totalTasks += 1;
+  current.totalTokens += tokens;
+  current.totalDurationMs += durationMs;
+  current.agentBreakdown[agent] = (current.agentBreakdown[agent] || 0) + 1;
+
+  try {
+    fs.writeFileSync(usageFile, JSON.stringify(current, null, 2), 'utf-8');
+  } catch {}
 }

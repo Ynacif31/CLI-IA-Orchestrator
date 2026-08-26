@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TaskRouter } from '../src/router';
-import { OmniRouteClassifier } from '../src/classifiers/omniRouteClassifier';
-import { ObsidianMcpBridge } from '../src/mcp/obsidianClient';
-import { TaskLogEntry } from '../src/types';
+import { spawnSync } from 'node:child_process';
+import * as path from 'node:path';
+import { TaskRouter } from '../src/router.js';
+import { OmniRouteClassifier } from '../src/classifiers/omniRouteClassifier.js';
+import { ObsidianMcpBridge } from '../src/mcp/obsidianClient.js';
+import type { TaskLogEntry } from '../src/types.js';
 
 // RFC 0004 Acceptance Tests
 test('RFC 0004 - Acceptance Criterion 1: Ambiguous task is routed correctly when OmniRoute is available', async () => {
@@ -136,4 +138,26 @@ test('RFC 0005 - Acceptance Criterion 2: Running without Obsidian MCP server doe
   });
   assert.equal(logResult, null);
   await disconnectedBridge.disconnect();
+});
+
+// RFC 0007 Acceptance Tests
+test('RFC 0007 - Acceptance Criterion 1: Non-interactive execution in scripts/pipes works directly via CLI run', () => {
+  const cliPath = path.resolve('src/cli.ts');
+  const res = spawnSync('node', ['--import', 'tsx', cliPath, 'run', 'criar script de build', '--agent', 'invalid-agent'], {
+    encoding: 'utf-8'
+  });
+
+  // CLI runs non-interactively without opening Ink and validates flags
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /agente inválido: invalid-agent/);
+});
+
+test('RFC 0007 - Acceptance Criterion 2: CLI help/options display interactive option and run commands', () => {
+  const cliPath = path.resolve('src/cli.ts');
+  const res = spawnSync('node', ['--import', 'tsx', cliPath, '--help'], { encoding: 'utf-8' });
+
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /Multi-agent CLI orchestrator/);
+  assert.match(res.stdout, /run \[options\] <task>/);
+  assert.match(res.stdout, /-i, --interactive/);
 });

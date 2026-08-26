@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { TaskLogEntry } from '../types';
+import { TaskLogEntry } from '../types.js';
 
 export function formatLogTimestamp(date: Date = new Date()): string {
   const pad = (n: number) => n.toString().padStart(2, '0');

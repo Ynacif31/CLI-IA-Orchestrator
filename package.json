@@ -1,6 +1,7 @@
 {
   "name": "orchestrator",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "description": "Multi-agent CLI orchestrator (RFC 0001)",
   "bin": {
@@ -9,18 +10,24 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "test": "tsx --test test/**/*.test.ts",
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "prepare": "npm run build"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.3.0",
+    "@types/react": "^19.2.18",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "commander": "^14.0.3",
-    "js-yaml": "^5.4.0"
+    "ink": "^7.1.1",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "js-yaml": "^5.4.0",
+    "react": "^19.2.8"
   }
 }

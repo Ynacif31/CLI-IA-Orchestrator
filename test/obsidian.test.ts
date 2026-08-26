@@ -4,8 +4,8 @@ import {
   ObsidianMcpBridge,
   formatLogTimestamp,
   buildTaskLogContent
-} from '../src/mcp/obsidianClient';
-import { TaskLogEntry } from '../src/types';
+} from '../src/mcp/obsidianClient.js';
+import type { TaskLogEntry } from '../src/types.js';
 
 test('formatLogTimestamp formats date into ISO-like filename friendly string', () => {
   const date = new Date(2026, 7, 25, 15, 30, 45); // August 25, 2026 15:30:45

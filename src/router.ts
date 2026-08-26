@@ -1,8 +1,8 @@
-import { AgentTarget, Classifier, TaskEvaluation } from './types';
-import { OmniRouteClassifier } from './classifiers/omniRouteClassifier';
+import type { AgentTarget, Classifier, TaskEvaluation } from './types.js';
+import { OmniRouteClassifier } from './classifiers/omniRouteClassifier.js';
 
-export { AgentTarget, Classifier, TaskEvaluation } from './types';
-export { OmniRouteClassifier } from './classifiers/omniRouteClassifier';
+export type { AgentTarget, Classifier, TaskEvaluation } from './types.js';
+export { OmniRouteClassifier } from './classifiers/omniRouteClassifier.js';
 
 export class TaskRouter {
   private classifier: Classifier;
@@ -13,21 +13,6 @@ export class TaskRouter {
 
   public async route(taskDescription: string): Promise<TaskEvaluation> {
     return TaskRouter.routeTask(taskDescription, this.classifier);
-  }
-
-  public static routeCustom(taskDescription: string, customRules: Record<string, string>): TaskEvaluation | null {
-    const text = taskDescription.toLowerCase();
-    for (const [keyword, agent] of Object.entries(customRules)) {
-      if (text.includes(keyword.toLowerCase())) {
-        return {
-          agent: agent as AgentTarget,
-          reason: `Regra customizada: "${keyword}"`,
-          estimatedComplexity: 'medium',
-          source: 'manual'
-        };
-      }
-    }
-    return null;
   }
 
   public static routeDeterministic(taskDescription: string): TaskEvaluation {

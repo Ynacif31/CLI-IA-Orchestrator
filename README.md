@@ -11,6 +11,27 @@ npm link   # instala `orchestrator` no PATH
 
 ## Uso
 
+### 1. Modo Interativo / UI de Terminal (Fase 5 - RFC 0007)
+Ao executar sem argumentos em um terminal interativo (TTY), ou com a flag `-i`/`--interactive`, ou pelo comando `ui`, o Orchestrator abre uma interface interativa rica construída com **Ink (React para Terminal)**:
+
+```sh
+orchestrator          # abre a UI interativa no terminal
+orchestrator ui       # comando explícito para a UI
+orchestrator -i       # flag de modo interativo
+```
+
+**Recursos da UI Interativa**:
+- ✍️ Entrada interativa de tarefas
+- 🎯 Visualização da sugestão do roteador com complexidade e motivo
+- 🔄 Seleção / confirmação do agente com navegação por setas e Enter
+- ⏳ Barra de status e spinners durante chamadas MCP e execução de subprocessos
+- 📊 Painel de consumo e atividade integrado (lendo `usage.json`)
+
+---
+
+### 2. Modo Não-Interativo (Scripts, Pipes e Automação)
+Para pipelines de CI/CD, scripts bash e uso direto sem UI gráfica de terminal:
+
 ```sh
 orchestrator --version
 
@@ -28,6 +49,8 @@ orchestrator run "<tarefa>" --no-classifier
 # Desativar integração com Obsidian MCP
 orchestrator run "<tarefa>" --no-obsidian
 ```
+
+---
 
 ## Configuração do OmniRoute (Fase 2 - RFC 0004)
 
@@ -47,6 +70,8 @@ O roteador tenta primeiro classificar a tarefa semanticamente via OmniRoute (Ant
      }
    }
    ```
+
+---
 
 ## Integração MCP Obsidian (Fase 3 - RFC 0005)
 
@@ -90,20 +115,13 @@ Fornece contexto do vault para o agente antes da execução e registra um log po
    orchestrator run "minha tarefa" --obsidian-cmd "npx" --obsidian-args "-y" "mcp-obsidian" "/caminho/do/vault"
    ```
 
-## Controle de Custo e Configuração (Fase 4 - RFC 0006)
+---
 
-Toda execução é registrada em `~/.orchestrator/usage.json` (timestamp, agente, tokens de entrada/saída quando o CLI expõe — claude/agy via `--output-format json` — e duração).
+## Controle de Custo e Atividade (`usage.json`)
 
-```sh
-orchestrator usage                          # total do dia/mês + alerta de threshold
-orchestrator config                         # mostra/edita ~/.orchestrator/config.yaml
-orchestrator config get threshold
-orchestrator config set threshold 50000
-orchestrator config set agents.agy.cmd /caminho/para/agy
-orchestrator config set routing.deploy open-code
-```
+As execuções registram dados de telemetria em `usage.json` (tarefas executadas, tokens acumulados, tempo total e distribuição por agente), exibidos no painel do topo da UI interativa.
 
-O `config.yaml` também aceita edição manual (lida em runtime, sem rebuild). Regras de `routing` (keyword → agente) têm precedência sobre as regras fixas e sobre o classificador.
+---
 
 ## Desenvolvimento e Testes
 

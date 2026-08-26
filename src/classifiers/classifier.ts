@@ -1,1 +1,1 @@
-export { AgentTarget, Classifier, OmniRouteConfig } from '../types';
+export type { AgentTarget, Classifier, OmniRouteConfig, ObsidianConfig, TaskLogEntry } from '../types.js';

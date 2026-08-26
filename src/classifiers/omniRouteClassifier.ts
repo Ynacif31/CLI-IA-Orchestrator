@@ -1,5 +1,5 @@
-import { AgentTarget, Classifier, OmniRouteConfig } from '../types';
-import { resolveOmniRouteConfig } from '../config';
+import { AgentTarget, Classifier, OmniRouteConfig } from '../types.js';
+import { resolveOmniRouteConfig } from '../config.js';
 
 const SYSTEM_PROMPT = `You are an expert AI task router for software engineering workflows. Your job is to classify the user's task into exactly ONE of the following 3 agent targets:
 - "claude-code": Tasks primarily focused on documentation, writing READMEs, creating OpenAPI/API specs, writing documentation guides, tutorials, or explaining architecture.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TaskRouter } from '../src/router';
-import { Classifier, AgentTarget } from '../src/types';
+import { TaskRouter } from '../src/router.js';
+import type { Classifier, AgentTarget } from '../src/types.js';
 
 class MockClassifier implements Classifier {
   constructor(private result?: AgentTarget, private shouldFail: boolean = false) {}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { resolveOmniRouteConfig, loadSettingsFromFile } from '../src/config';
+import { resolveOmniRouteConfig, loadSettingsFromFile } from '../src/config.js';
 
 test('resolveOmniRouteConfig returns defaults when no env or file is present', () => {
   const originalEnv = { ...process.env };
