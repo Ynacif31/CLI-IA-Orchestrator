@@ -117,9 +117,20 @@ Fornece contexto do vault para o agente antes da execução e registra um log po
 
 ---
 
-## Controle de Custo e Atividade (`usage.json`)
+## Controle de Custo e Configuração (Fase 4 - RFC 0006)
 
-As execuções registram dados de telemetria em `usage.json` (tarefas executadas, tokens acumulados, tempo total e distribuição por agente), exibidos no painel do topo da UI interativa.
+Cada execução registra uma entrada em `~/.orchestrator/usage.json` (timestamp, agente, tokens de entrada/saída quando o CLI expõe — claude/agy via `--output-format json` — e duração). Estado de runtime fica fora do repositório, por decisão da RFC 0001.
+
+```sh
+orchestrator usage                          # hoje/mês/total + distribuição por agente + alerta de threshold
+orchestrator config                         # mostra/edita ~/.orchestrator/config.yaml (cria com defaults)
+orchestrator config get threshold
+orchestrator config set threshold 50000
+orchestrator config set agents.agy.cmd /caminho/para/agy
+orchestrator config set routing.deploy open-code
+```
+
+O `config.yaml` também aceita edição manual (lida em runtime, sem rebuild). Regras de `routing` (keyword → agente) têm precedência sobre o classificador e as regras fixas; `agents.<nome>.cmd` sobrescreve o binário usado na execução.
 
 ---
 

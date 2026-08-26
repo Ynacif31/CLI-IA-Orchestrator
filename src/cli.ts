@@ -5,8 +5,8 @@ import { TaskRouter } from './router.js';
 import { OmniRouteClassifier } from './classifiers/omniRouteClassifier.js';
 import { AgentRunner } from './adapters/agentRunner.js';
 import { ObsidianMcpBridge } from './mcp/obsidianClient.js';
-import { resolveObsidianConfig } from './config.js';
-import { recordUsage } from './usage.js';
+import { resolveObsidianConfig, loadConfig, saveConfig, dumpConfig, getConfigValue, setConfigValue, coerceValue, CONFIG_FILE } from './config.js';
+import { recordUsage, printUsageReport } from './usage.js';
 import type { TaskEvaluation } from './types.js';
 import { startInteractiveUI } from './ui/index.js';
 
@@ -64,6 +64,8 @@ program
     obsidianArgs?: string[];
     obsidian?: boolean;
   }) => {
+    const cfg = loadConfig();
+
     let agent: string;
     let evaluation: TaskEvaluation;
 
@@ -80,7 +82,14 @@ program
         source: 'manual'
       };
     } else {
-      if (opts.classifier === false) {
+      const custom = TaskRouter.routeCustom(task, cfg.routing);
+      if (custom) {
+        if (!AgentRunner.commands[custom.agent]) {
+          console.error(`agente inválido na regra customizada: ${custom.agent}`);
+          process.exit(1);
+        }
+        evaluation = custom;
+      } else if (opts.classifier === false) {
         evaluation = TaskRouter.routeDeterministic(task);
         console.error(`[router] Classificador desativado manualmente. Usando fallback determinístico.`);
       } else {
@@ -95,7 +104,7 @@ program
       console.error(`→ ${agent} (${evaluation.estimatedComplexity}): ${evaluation.reason}`);
     }
 
-    const { cmd } = AgentRunner.commands[agent];
+    const cmd = cfg.agents[agent]?.cmd ?? AgentRunner.commands[agent].cmd;
     if (!hasBinary(cmd)) {
       console.error(`erro: binário '${cmd}' não encontrado no PATH`);
       process.exit(1);
@@ -129,13 +138,18 @@ program
     let exitCode = 0;
     let durationMs = 0;
     let totalTokens = 0;
+    let inputTokens: number | null = null;
+    let outputTokens: number | null = null;
 
     try {
-      const runResult = await AgentRunner.execute(agent, task, { context: obsidianContext });
+      const runResult = await AgentRunner.execute(agent, task, { cmd, context: obsidianContext });
       exitCode = runResult.exitCode ?? 0;
       durationMs = runResult.durationMs;
+      inputTokens = runResult.inputTokens;
+      outputTokens = runResult.outputTokens;
       totalTokens = (runResult.inputTokens ?? 0) + (runResult.outputTokens ?? 0);
       if (exitCode !== 0) {
+        console.error(`Agente ${agent} finalizou com código de saída ${exitCode}`);
         process.exitCode = exitCode;
       }
     } catch (err: any) {
@@ -144,7 +158,7 @@ program
       process.exitCode = 1;
       durationMs = Date.now() - startTime;
     } finally {
-      recordUsage(agent, durationMs, totalTokens);
+      recordUsage(agent, durationMs, totalTokens, undefined, { inputTokens, outputTokens });
 
       if (obsidianBridge.isConnected()) {
         try {
@@ -167,6 +181,49 @@ program
         }
       }
     }
+  });
+
+program
+  .command('usage')
+  .description('Mostra consumo do dia/mês e alerta se passar do limite configurado')
+  .action(() => {
+    printUsageReport(loadConfig().threshold);
+  });
+
+program
+  .command('config')
+  .description('Mostra a configuração (cria ~/.orchestrator/config.yaml se ausente); use "config get <chave>" ou "config set <chave> <valor>"')
+  .argument('[op]', 'get | set')
+  .argument('[key]', 'chave em dot-path, ex: agents.agy.cmd, routing.deploy, threshold')
+  .argument('[value]', 'valor (apenas no set)')
+  .action((op: string | undefined, key: string | undefined, value: string | undefined) => {
+    const cfg = loadConfig();
+    if (op === 'get') {
+      if (!key) {
+        console.error('uso: orchestrator config get <chave>');
+        process.exit(1);
+      }
+      const found = getConfigValue(cfg, key);
+      console.log(found === undefined ? '' : typeof found === 'object' ? JSON.stringify(found) : String(found));
+      return;
+    }
+    if (op === 'set') {
+      if (!key || value === undefined) {
+        console.error('uso: orchestrator config set <chave> <valor>');
+        process.exit(1);
+      }
+      setConfigValue(cfg, key, coerceValue(value));
+      saveConfig(cfg);
+      console.log('ok');
+      return;
+    }
+    if (op !== undefined) {
+      console.error(`operação desconhecida: ${op} (use get | set)`);
+      process.exit(1);
+    }
+    saveConfig(cfg);
+    console.log(`config: ${CONFIG_FILE}`);
+    console.log(dumpConfig(cfg));
   });
 
 program.parse(process.argv);
