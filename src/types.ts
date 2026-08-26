@@ -17,3 +17,19 @@ export interface OmniRouteConfig {
   model?: string;
   timeoutMs?: number;
 }
+
+export interface ObsidianConfig {
+  command?: string;
+  args?: string[];
+  vaultPath?: string;
+}
+
+export interface TaskLogEntry {
+  agent: AgentTarget | string;
+  task: string;
+  reason: string;
+  estimatedComplexity: 'low' | 'medium' | 'high';
+  exitCode: number;
+  durationMs: number;
+  date?: Date;
+}

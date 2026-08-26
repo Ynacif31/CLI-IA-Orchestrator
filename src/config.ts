@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { OmniRouteConfig } from './types';
+import { OmniRouteConfig, ObsidianConfig } from './types';
 
 const DEFAULT_BASE_URL = 'http://localhost:20128';
 const DEFAULT_MODEL = 'combo/default';
@@ -17,6 +17,19 @@ interface SettingsJson {
     authToken?: string;
     model?: string;
     timeoutMs?: number;
+  };
+  obsidian?: {
+    command?: string;
+    args?: string[];
+    vaultPath?: string;
+  };
+  mcpServers?: {
+    obsidian?: {
+      command?: string;
+      args?: string[];
+      env?: Record<string, string>;
+    };
+    [serverName: string]: any;
   };
 }
 
@@ -87,9 +100,61 @@ export function resolveOmniRouteConfig(
   const timeoutMs = overrides.timeoutMs || envTimeout || fileTimeout || DEFAULT_TIMEOUT_MS;
 
   return {
-    baseUrl: baseUrl.replace(/\/+$/, ''), // strip trailing slashes
+    baseUrl: baseUrl.replace(/\/+$/, ''),
     authToken,
     model,
     timeoutMs
+  };
+}
+
+export function parseArgsArray(rawArgs: string | string[] | undefined): string[] {
+  if (!rawArgs) return [];
+  if (Array.isArray(rawArgs)) return rawArgs;
+  if (rawArgs.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(rawArgs);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {}
+  }
+  return rawArgs.split(' ').map((s) => s.trim()).filter(Boolean);
+}
+
+export function resolveObsidianConfig(
+  overrides: Partial<ObsidianConfig> = {},
+  searchDir: string = process.cwd()
+): ObsidianConfig {
+  const fileSettings = loadSettingsFromFile(searchDir) || {};
+  const fileEnv = fileSettings.env || {};
+
+  const command =
+    overrides.command ||
+    process.env.OBSIDIAN_MCP_COMMAND ||
+    fileSettings.obsidian?.command ||
+    fileSettings.mcpServers?.obsidian?.command ||
+    fileEnv.OBSIDIAN_MCP_COMMAND;
+
+  let args: string[] | undefined = overrides.args;
+  if (!args) {
+    if (process.env.OBSIDIAN_MCP_ARGS) {
+      args = parseArgsArray(process.env.OBSIDIAN_MCP_ARGS);
+    } else if (fileSettings.obsidian?.args) {
+      args = parseArgsArray(fileSettings.obsidian.args);
+    } else if (fileSettings.mcpServers?.obsidian?.args) {
+      args = parseArgsArray(fileSettings.mcpServers.obsidian.args);
+    } else if (fileEnv.OBSIDIAN_MCP_ARGS) {
+      args = parseArgsArray(fileEnv.OBSIDIAN_MCP_ARGS);
+    }
+  }
+
+  const vaultPath =
+    overrides.vaultPath ||
+    process.env.OBSIDIAN_VAULT_PATH ||
+    fileSettings.obsidian?.vaultPath ||
+    fileEnv.OBSIDIAN_VAULT_PATH;
+
+  return {
+    command,
+    args: args || [],
+    vaultPath
   };
 }
