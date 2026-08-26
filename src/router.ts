@@ -15,6 +15,21 @@ export class TaskRouter {
     return TaskRouter.routeTask(taskDescription, this.classifier);
   }
 
+  public static routeCustom(taskDescription: string, customRules: Record<string, string>): TaskEvaluation | null {
+    const text = taskDescription.toLowerCase();
+    for (const [keyword, agent] of Object.entries(customRules)) {
+      if (text.includes(keyword.toLowerCase())) {
+        return {
+          agent: agent as AgentTarget,
+          reason: `Regra customizada: "${keyword}"`,
+          estimatedComplexity: 'medium',
+          source: 'manual'
+        };
+      }
+    }
+    return null;
+  }
+
   public static routeDeterministic(taskDescription: string): TaskEvaluation {
     const text = taskDescription.toLowerCase();
 

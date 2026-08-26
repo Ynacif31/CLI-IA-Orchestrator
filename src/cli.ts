@@ -3,9 +3,19 @@ import { spawnSync } from 'node:child_process';
 import { Command } from 'commander';
 import { TaskRouter } from './router';
 import { OmniRouteClassifier } from './classifiers/omniRouteClassifier';
-import { AgentExitError, AgentRunner } from './adapters/agentRunner';
+import { AgentRunner, RunResult } from './adapters/agentRunner';
 import { ObsidianMcpBridge } from './mcp/obsidianClient';
-import { resolveObsidianConfig } from './config';
+import {
+  resolveObsidianConfig,
+  loadConfig,
+  saveConfig,
+  dumpConfig,
+  getConfigValue,
+  setConfigValue,
+  coerceValue,
+  CONFIG_FILE
+} from './config';
+import { recordUsage, printUsageReport } from './usage';
 import { TaskEvaluation } from './types';
 
 const AGENT_NAMES = Object.keys(AgentRunner.commands);
@@ -50,6 +60,8 @@ program
     obsidianArgs?: string[];
     obsidian?: boolean;
   }) => {
+    const cfg = loadConfig();
+
     let agent: string;
     let evaluation: TaskEvaluation;
 
@@ -60,13 +72,20 @@ program
       }
       agent = opts.agent;
       evaluation = {
-        agent: agent as any,
+        agent: agent as TaskEvaluation['agent'],
         reason: 'Seleção manual de agente via flag --agent',
         estimatedComplexity: 'medium',
         source: 'manual'
       };
     } else {
-      if (opts.classifier === false) {
+      const custom = TaskRouter.routeCustom(task, cfg.routing);
+      if (custom) {
+        if (!AgentRunner.commands[custom.agent]) {
+          console.error(`agente inválido na regra customizada: ${custom.agent}`);
+          process.exit(1);
+        }
+        evaluation = custom;
+      } else if (opts.classifier === false) {
         evaluation = TaskRouter.routeDeterministic(task);
         console.error(`[router] Classificador desativado manualmente. Usando fallback determinístico.`);
       } else {
@@ -81,7 +100,7 @@ program
       console.error(`→ ${agent} (${evaluation.estimatedComplexity}): ${evaluation.reason}`);
     }
 
-    const { cmd } = AgentRunner.commands[agent];
+    const cmd = cfg.agents[agent]?.cmd ?? AgentRunner.commands[agent].cmd;
     if (!hasBinary(cmd)) {
       console.error(`erro: binário '${cmd}' não encontrado no PATH`);
       process.exit(1);
@@ -111,45 +130,91 @@ program
       }
     }
 
-    const startTime = Date.now();
-    let exitCode = 0;
-
+    let result: RunResult;
     try {
-      await AgentRunner.execute(agent, task, obsidianContext);
+      result = await AgentRunner.execute(agent, task, { cmd, context: obsidianContext });
     } catch (err) {
-      if (err instanceof AgentExitError) {
-        console.error(err.message);
-        exitCode = err.exitCode;
-        process.exitCode = err.exitCode;
-      } else {
-        console.error(`erro ao executar ${agent}: ${(err as Error).message}`);
-        exitCode = 1;
-        process.exitCode = 1;
-      }
-    } finally {
-      const durationMs = Date.now() - startTime;
+      console.error(`erro ao executar ${agent}: ${(err as Error).message}`);
+      result = { exitCode: 1, inputTokens: null, outputTokens: null, durationMs: 0 };
+    }
 
-      if (obsidianBridge.isConnected()) {
-        try {
-          const logPath = await obsidianBridge.createTaskLog({
-            agent,
-            task,
-            reason: evaluation.reason,
-            estimatedComplexity: evaluation.estimatedComplexity,
-            exitCode,
-            durationMs
-          });
+    const exitCode = result.exitCode ?? 1;
+    if (exitCode !== 0) {
+      console.error(`Agente ${agent} finalizou com código de saída ${exitCode}`);
+    }
+    process.exitCode = exitCode;
 
-          if (logPath) {
-            console.error(`[obsidian] Log registrado em ${logPath}`);
-          }
-        } catch (err: any) {
-          console.error(`[obsidian] Aviso: Falha ao registrar log no vault: ${err.message}`);
-        } finally {
-          await obsidianBridge.disconnect().catch(() => {});
+    recordUsage({
+      timestamp: new Date().toISOString(),
+      agent,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      durationMs: result.durationMs
+    });
+
+    if (obsidianBridge.isConnected()) {
+      try {
+        const logPath = await obsidianBridge.createTaskLog({
+          agent,
+          task,
+          reason: evaluation.reason,
+          estimatedComplexity: evaluation.estimatedComplexity,
+          exitCode,
+          durationMs: result.durationMs
+        });
+
+        if (logPath) {
+          console.error(`[obsidian] Log registrado em ${logPath}`);
         }
+      } catch (err: any) {
+        console.error(`[obsidian] Aviso: Falha ao registrar log no vault: ${err.message}`);
+      } finally {
+        await obsidianBridge.disconnect().catch(() => {});
       }
     }
+  });
+
+program
+  .command('usage')
+  .description('Mostra consumo do dia/mês e alerta se passar do limite configurado')
+  .action(() => {
+    printUsageReport(loadConfig().threshold);
+  });
+
+program
+  .command('config')
+  .description('Mostra a configuração (cria ~/.orchestrator/config.yaml se ausente); use "config get <chave>" ou "config set <chave> <valor>"')
+  .argument('[op]', 'get | set')
+  .argument('[key]', 'chave em dot-path, ex: agents.agy.cmd, routing.deploy, threshold')
+  .argument('[value]', 'valor (apenas no set)')
+  .action((op: string | undefined, key: string | undefined, value: string | undefined) => {
+    const cfg = loadConfig();
+    if (op === 'get') {
+      if (!key) {
+        console.error('uso: orchestrator config get <chave>');
+        process.exit(1);
+      }
+      const found = getConfigValue(cfg, key);
+      console.log(found === undefined ? '' : typeof found === 'object' ? JSON.stringify(found) : String(found));
+      return;
+    }
+    if (op === 'set') {
+      if (!key || value === undefined) {
+        console.error('uso: orchestrator config set <chave> <valor>');
+        process.exit(1);
+      }
+      setConfigValue(cfg, key, coerceValue(value));
+      saveConfig(cfg);
+      console.log('ok');
+      return;
+    }
+    if (op !== undefined) {
+      console.error(`operação desconhecida: ${op} (use get | set)`);
+      process.exit(1);
+    }
+    saveConfig(cfg);
+    console.log(`config: ${CONFIG_FILE}`);
+    console.log(dumpConfig(cfg));
   });
 
 program.parse(process.argv);

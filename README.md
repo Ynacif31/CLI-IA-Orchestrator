@@ -90,6 +90,21 @@ Fornece contexto do vault para o agente antes da execução e registra um log po
    orchestrator run "minha tarefa" --obsidian-cmd "npx" --obsidian-args "-y" "mcp-obsidian" "/caminho/do/vault"
    ```
 
+## Controle de Custo e Configuração (Fase 4 - RFC 0006)
+
+Toda execução é registrada em `~/.orchestrator/usage.json` (timestamp, agente, tokens de entrada/saída quando o CLI expõe — claude/agy via `--output-format json` — e duração).
+
+```sh
+orchestrator usage                          # total do dia/mês + alerta de threshold
+orchestrator config                         # mostra/edita ~/.orchestrator/config.yaml
+orchestrator config get threshold
+orchestrator config set threshold 50000
+orchestrator config set agents.agy.cmd /caminho/para/agy
+orchestrator config set routing.deploy open-code
+```
+
+O `config.yaml` também aceita edição manual (lida em runtime, sem rebuild). Regras de `routing` (keyword → agente) têm precedência sobre as regras fixas e sobre o classificador.
+
 ## Desenvolvimento e Testes
 
 ```sh

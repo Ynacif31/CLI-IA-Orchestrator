@@ -1,5 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
+import * as yaml from 'js-yaml';
 import { OmniRouteConfig, ObsidianConfig } from './types';
 
 const DEFAULT_BASE_URL = 'http://localhost:20128';
@@ -157,4 +159,74 @@ export function resolveObsidianConfig(
     args: args || [],
     vaultPath
   };
+}
+
+// ==== RFC 0006: runtime config em ~/.orchestrator/config.yaml ====
+
+export interface RuntimeConfig {
+  agents: Record<string, { cmd: string }>;
+  routing: Record<string, string>;
+  threshold: number;
+}
+
+const RUNTIME_DIR = path.join(homedir(), '.orchestrator');
+export const CONFIG_FILE = path.join(RUNTIME_DIR, 'config.yaml');
+
+export const DEFAULTS: RuntimeConfig = {
+  agents: {
+    'claude-code': { cmd: 'claude' },
+    'open-code': { cmd: 'opencode' },
+    'agy': { cmd: 'agy' }
+  },
+  routing: {},
+  threshold: 100_000
+};
+
+export function loadConfig(): RuntimeConfig {
+  if (!fs.existsSync(CONFIG_FILE)) return structuredClone(DEFAULTS);
+  try {
+    const raw = yaml.load(fs.readFileSync(CONFIG_FILE, 'utf8')) as Partial<RuntimeConfig> | undefined;
+    return {
+      agents: { ...DEFAULTS.agents, ...(raw?.agents ?? {}) },
+      routing: raw?.routing ?? {},
+      threshold: typeof raw?.threshold === 'number' ? raw.threshold : DEFAULTS.threshold
+    };
+  } catch {
+    return structuredClone(DEFAULTS);
+  }
+}
+
+export function saveConfig(cfg: RuntimeConfig): void {
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+  fs.writeFileSync(CONFIG_FILE, yaml.dump(cfg));
+}
+
+export function dumpConfig(cfg: RuntimeConfig): string {
+  return yaml.dump(cfg);
+}
+
+export function getConfigValue(cfg: RuntimeConfig, key: string): unknown {
+  return key.split('.').reduce<unknown>((acc, part) => {
+    if (acc == null || typeof acc !== 'object') return undefined;
+    return (acc as Record<string, unknown>)[part];
+  }, cfg);
+}
+
+export function setConfigValue(cfg: RuntimeConfig, key: string, value: unknown): void {
+  const parts = key.split('.');
+  const root = cfg as unknown as Record<string, unknown>;
+  let cur = root;
+  for (const part of parts.slice(0, -1)) {
+    const next = cur[part];
+    if (next == null || typeof next !== 'object') cur[part] = {};
+    cur = cur[part] as Record<string, unknown>;
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+export function coerceValue(raw: string): unknown {
+  if (/^\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
 }

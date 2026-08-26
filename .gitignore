@@ -1,2 +1,6 @@
 node_modules/
 dist/
+graphify-out/
+Settings.local.json
+settings.local.json
+.env
