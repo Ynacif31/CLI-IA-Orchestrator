@@ -13,9 +13,14 @@ npm link   # instala `orchestrator` no PATH
 
 ```sh
 orchestrator --version
-orchestrator --help
+orchestrator run "documentar a API de billing"     # → claude -p
+orchestrator run "refatorar o módulo de pagamentos" # → agy -p
+orchestrator run "criar script de deploy"           # → opencode run
+orchestrator run "<tarefa>" --agent open-code       # override manual
 ```
 
-Dev loop: `npm run dev -- <args>` (tsx). Build de release: `npm run build` (tsc).
+Roteamento determinístico por keyword (RFC 0003). O exit code do agente propaga pro `orchestrator`.
 
-Fase 0 concluída — roteamento chega na Fase 1 (RFC 0003).
+Dev loop: `npm run dev -- run "<tarefa>"` (tsx). Build de release: `npm run build` (tsc).
+
+Fase 1 concluída — classificador de IA chega na Fase 2.
