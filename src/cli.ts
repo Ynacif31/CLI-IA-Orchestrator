@@ -2,12 +2,17 @@
 import { spawnSync } from 'node:child_process';
 import { Command } from 'commander';
 import { TaskRouter } from './router';
+import { OmniRouteClassifier } from './classifiers/omniRouteClassifier';
 import { AgentExitError, AgentRunner } from './adapters/agentRunner';
 
 const AGENT_NAMES = Object.keys(AgentRunner.commands);
 
-function version(): string {
-  return require('../package.json').version;
+function getVersion(): string {
+  try {
+    return require('../package.json').version;
+  } catch {
+    return '0.1.0';
+  }
 }
 
 function hasBinary(name: string): boolean {
@@ -19,13 +24,23 @@ const program = new Command();
 program
   .name('orchestrator')
   .description('Multi-agent CLI orchestrator (RFC 0001)')
-  .version(version(), '-v, --version');
+  .version(getVersion(), '-v, --version');
 
 program
   .command('run <task>')
-  .description('Rota uma tarefa por keyword e executa o agente escolhido')
+  .description('Rota uma tarefa por classificação semântica/keyword e executa o agente escolhido')
   .option('-a, --agent <name>', `override manual (${AGENT_NAMES.join(' | ')})`)
-  .action(async (task: string, opts: { agent?: string }) => {
+  .option('--omniroute-url <url>', 'URL base do OmniRoute (ex: http://localhost:20128)')
+  .option('--omniroute-token <token>', 'Token de autenticação do OmniRoute')
+  .option('--omniroute-model <model>', 'Modelo ou combo do OmniRoute (ex: combo/meu-combo)')
+  .option('--no-classifier', 'desativa o classificador semântico e usa apenas regras determinísticas')
+  .action(async (task: string, opts: {
+    agent?: string;
+    omnirouteUrl?: string;
+    omnirouteToken?: string;
+    omnirouteModel?: string;
+    classifier?: boolean;
+  }) => {
     let agent: string;
     if (opts.agent) {
       if (!AgentRunner.commands[opts.agent]) {
@@ -34,7 +49,18 @@ program
       }
       agent = opts.agent;
     } else {
-      const evaluation = TaskRouter.routeTask(task);
+      let evaluation;
+      if (opts.classifier === false) {
+        evaluation = TaskRouter.routeDeterministic(task);
+        console.error(`[router] Classificador desativado manualmente. Usando fallback determinístico.`);
+      } else {
+        const classifier = new OmniRouteClassifier({
+          baseUrl: opts.omnirouteUrl,
+          authToken: opts.omnirouteToken,
+          model: opts.omnirouteModel
+        });
+        evaluation = await TaskRouter.routeTask(task, classifier);
+      }
       agent = evaluation.agent;
       console.error(`→ ${agent} (${evaluation.estimatedComplexity}): ${evaluation.reason}`);
     }

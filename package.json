@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "test": "tsx --test test/**/*.test.ts",
     "build": "tsc",
     "prepare": "npm run build"
   },
