@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useApp } from 'ink';
+import React, { useState, useEffect, useRef } from 'react';
+import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import { TaskRouter } from '../router.js';
-import { AgentRunner } from '../adapters/agentRunner.js';
+import { AgentRunner, AgentEvent } from '../adapters/agentRunner.js';
+import { runClaudeSdk, PermissionRequest } from '../adapters/claudeSdkRunner.js';
 import { ObsidianMcpBridge } from '../mcp/obsidianClient.js';
 import { resolveObsidianConfig } from '../config.js';
 import { loadUsageStats, recordUsage, UsageStats } from '../usage.js';
@@ -28,6 +29,25 @@ export function App() {
   const [obsidianLogPath, setObsidianLogPath] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<{ exitCode: number; durationMs: number; error?: string } | null>(null);
   const [usage, setUsage] = useState<UsageStats>(loadUsageStats());
+  const [liveModel, setLiveModel] = useState<string | null>(null);
+  const [liveTokens, setLiveTokens] = useState<{ input: number; output: number }>({ input: 0, output: 0 });
+  const [liveTools, setLiveTools] = useState<Record<string, number>>({});
+  const [pendingApproval, setPendingApproval] = useState<PermissionRequest | null>(null);
+  const approvalResolver = useRef<((approved: boolean) => void) | null>(null);
+
+  useInput((input) => {
+    if (!pendingApproval || !approvalResolver.current) return;
+    const key = input.toLowerCase();
+    if (key === 'y' || key === 's') {
+      approvalResolver.current(true);
+      approvalResolver.current = null;
+      setPendingApproval(null);
+    } else if (key === 'n') {
+      approvalResolver.current(false);
+      approvalResolver.current = null;
+      setPendingApproval(null);
+    }
+  });
 
   useEffect(() => {
     setUsage(loadUsageStats());
@@ -75,14 +95,49 @@ export function App() {
     }
 
     setStatusMessage(`Executando agente ${agent}...`);
+    setLiveModel(null);
+    setLiveTokens({ input: 0, output: 0 });
+    setLiveTools({});
+    setPendingApproval(null);
+    approvalResolver.current = null;
     const startTime = Date.now();
     let exitCode = 0;
     let durationMs = 0;
     let totalTokens = 0;
     let errorMsg: string | undefined;
 
+    const handleAgentEvent = (event: AgentEvent) => {
+      if (event.model) setLiveModel(event.model);
+      if (event.inputTokens != null || event.outputTokens != null) {
+        setLiveTokens((prev) => ({
+          input: event.inputTokens ?? prev.input,
+          output: event.outputTokens ?? prev.output
+        }));
+      }
+      if (event.toolName) {
+        setLiveTools((prev) => ({ ...prev, [event.toolName!]: (prev[event.toolName!] ?? 0) + 1 }));
+      }
+    };
+
+    const handlePermissionRequest = (req: PermissionRequest): Promise<boolean> => {
+      return new Promise((resolve) => {
+        approvalResolver.current = resolve;
+        setPendingApproval(req);
+      });
+    };
+
     try {
-      const runResult = await AgentRunner.execute(agent, taskText, { context: obsidianContext });
+      const runResult = agent === 'claude-code'
+        ? await runClaudeSdk(taskText, {
+            context: obsidianContext,
+            onEvent: handleAgentEvent,
+            onPermissionRequest: handlePermissionRequest
+          })
+        : await AgentRunner.execute(agent, taskText, {
+            context: obsidianContext,
+            silent: true,
+            onEvent: handleAgentEvent
+          });
       exitCode = runResult.exitCode ?? 0;
       durationMs = runResult.durationMs;
       totalTokens = (runResult.inputTokens ?? 0) + (runResult.outputTokens ?? 0);
@@ -215,6 +270,28 @@ export function App() {
           </Text>
           <Text color="gray">Agente alvo: {selectedAgent}</Text>
           <Text color="gray">Tarefa: {task}</Text>
+          <Box marginTop={1} flexDirection="column" borderStyle="single" borderColor="magenta" paddingX={1}>
+            <Text bold color="magenta">📡 Telemetria ao vivo</Text>
+            <Text color="gray">
+              Modelo: <Text color="white">{liveModel ?? (selectedAgent === 'open-code' ? 'não exposto pelo opencode run' : 'aguardando...')}</Text>
+            </Text>
+            <Text color="gray">
+              Tokens: <Text color="white">{liveTokens.input.toLocaleString()} in / {liveTokens.output.toLocaleString()} out</Text>
+            </Text>
+            {Object.keys(liveTools).length > 0 && (
+              <Text color="gray">
+                Ferramentas: {Object.entries(liveTools).map(([name, count]) => `${name} ×${count}`).join(' | ')}
+              </Text>
+            )}
+          </Box>
+
+          {pendingApproval && (
+            <Box marginTop={1} flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1}>
+              <Text bold color="yellow">🔐 Claude quer usar a ferramenta: {pendingApproval.toolName}</Text>
+              <Text color="gray">{JSON.stringify(pendingApproval.input)}</Text>
+              <Text color="white">Aprovar? [y] sim / [n] não</Text>
+            </Box>
+          )}
         </Box>
       )}
 
